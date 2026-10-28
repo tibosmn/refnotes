@@ -67,13 +67,39 @@ class refnotes_parser_core {
     public function exitParsingContext($handler) {
         $this->handler = $handler;
 
-        unset($this->context[count($this->context) - 1]);
+        // Fail-safe: NEVER pop the base context, guaranteeing we always have a context to fallback to.
+        if (count($this->context) > 1) {
+            unset($this->context[count($this->context) - 1]);
+        }
     }
 
     /**
      *
      */
     public function getInstructions($text) {
+        if (method_exists($this->handler, 'getModeRegistry')) {
+            $registry = $this->handler->getModeRegistry();
+            $calls = $registry->withSubParser(
+                array(),
+                array(),
+                function ($subParser) use ($text) {
+                    $subParser->getHandler()->reset();
+                    $subParser->parse($text);
+                    return $subParser->getHandler()->calls;
+                }
+            );
+
+            $filtered = array();
+            if (is_array($calls)) {
+                foreach ($calls as $call) {
+                    if ($call[0] == 'document_start' || $call[0] == 'document_end') continue;
+                    if ($call[0] == 'p_open' || $call[0] == 'p_close') continue;
+                    $filtered[] = $call;
+                }
+            }
+            return $filtered;
+        }
+
         $this->callWriter = new refnotes_nested_call_writer($this->handler->getCallWriter(), $this->handler);
 
         $this->callWriter->connect();

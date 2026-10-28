@@ -105,10 +105,24 @@ class refnotes_reference_database {
     private function loadPages() {
         global $conf;
 
-        if (file_exists($conf['indexdir'] . '/page.idx')) {
-            require_once(DOKU_INC . 'inc/indexer.php');
+        $pageIndex = array();
+
+        if (class_exists('\dokuwiki\Search\Indexer')) {
+            $indexer = new \dokuwiki\Search\Indexer();
+            if (method_exists($indexer, 'getAllPages')) {
+                $pageIndex = $indexer->getAllPages();
+            } elseif (method_exists($indexer, 'getPages')) {
+                $pageIndex = $indexer->getPages();
+            }
+        } elseif (file_exists($conf['indexdir'] . '/page.idx')) {
+            if (file_exists(DOKU_INC . 'inc/indexer.php')) {
+                require_once(DOKU_INC . 'inc/indexer.php');
+            }
 
             $pageIndex = idx_getIndex('page', '');
+        }
+
+        if (!empty($pageIndex)) {
             $namespace = refnotes_configuration::getSetting('reference-db-namespace');
             $namespacePattern = '/^' . trim($namespace, ':') . ':/';
             $cache = new refnotes_reference_database_cache();

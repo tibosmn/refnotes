@@ -50,6 +50,15 @@ class refnotes_bibtex_parser extends \dokuwiki\Parsing\Parser {
     }
 
     /**
+     * Override addMode to avoid DokuWiki Mort dependency injection
+     * which expects a DokuWiki ModeRegistry and Handler.
+     */
+    public function addMode($name, \dokuwiki\Parsing\ParserMode\AbstractMode $Mode) {
+        $Mode->setLexer($this->lexer);
+        $this->modes[$name] = $Mode;
+    }
+
+    /**
      *
      */
     public function connectModes() {
@@ -83,26 +92,35 @@ class refnotes_bibtex_lexer extends \dokuwiki\Parsing\Lexer\Lexer {
      */
     public function parse($text) {
         $lastMode = '';
+        // Offset tracking is required by DokuWiki Mort Lexer which doesn't slice the input string
+        $offset = 0;
 
-        while (is_array($parsed = $this->reduce($text))) {
+        // Reset the mode stack for DokuWiki Mort lexer
+        $this->modeStack = new \dokuwiki\Parsing\Lexer\StateStack('base');
+
+        while (is_array($parsed = $this->reduce($text, $offset))) {
             list($unmatched, $matched, $mode) = $parsed;
+            $matchPos = $offset + strlen($unmatched);
 
-            if (!$this->dispatchTokens($unmatched, $matched, $mode, 0, 0)) {
+            if (!$this->dispatchTokens($unmatched, $matched, $mode, $offset, $matchPos)) {
                 return false;
             }
+
+            $newOffset = $matchPos + strlen($matched);
 
             if (empty($unmatched) && empty($matched) && ($lastMode == $this->modeStack->getCurrent())) {
                 return false;
             }
 
             $lastMode = $this->modeStack->getCurrent();
+            $offset = $newOffset;
         }
 
         if (!$parsed) {
             return false;
         }
 
-        return $this->invokeHandler($text, DOKU_LEXER_UNMATCHED, 0);
+        return $this->invokeHandler(substr($text, $offset), DOKU_LEXER_UNMATCHED, $offset);
     }
 
     /**
@@ -139,6 +157,13 @@ class refnotes_bibtex_mode extends \dokuwiki\Parsing\ParserMode\AbstractMode {
         $this->specialPattern = array();
         $this->entryPattern = array();
         $this->exitPattern = array();
+    }
+
+    /**
+     * Required by AbstractMode but not used by refnotes custom parser.
+     */
+    public function handle($match, $state, $pos, Doku_Handler $handler) {
+        return false;
     }
 
     /**
@@ -218,7 +243,7 @@ class refnotes_bibtex_entry_mode extends refnotes_bibtex_mode {
 
         list($open, $close) = ($type == 'parented') ? array('\(', '\)') : array('{', '}');
 
-        $this->entryPattern[] = '^@\w+\s*' . $open . '(?=.*' . $close . ')';
+        $this->entryPattern[] = '@\w+\s*' . $open . '(?=.*' . $close . ')';
         $this->exitPattern[] = '\s*(?:' . $close . '|(?=@))';
 
         $this->allowedModes = array('field');
@@ -234,7 +259,7 @@ class refnotes_bibtex_field_mode extends refnotes_bibtex_mode {
     public function __construct() {
         parent::__construct();
 
-        $this->entryPattern[] = '^\s*\w[\w-]+\s*=\s*';
+        $this->entryPattern[] = '\s*\w[\w-]+\s*=\s*';
         $this->exitPattern[] = '\s*(?:,|(?=[\)}@]))';
 
         $this->allowedModes = array('integer_value', 'string_value_quoted', 'string_value_braced', 'concatenation');
@@ -250,7 +275,7 @@ class refnotes_bibtex_integer_value_mode extends refnotes_bibtex_mode {
     public function __construct() {
         parent::__construct();
 
-        $this->specialPattern[] = '^\d+';
+        $this->specialPattern[] = '\G\d+';
     }
 }
 
@@ -268,7 +293,7 @@ class refnotes_bibtex_string_value_mode extends refnotes_bibtex_mode {
 
         list($open, $close, $exit) = ($type == 'quoted') ? array('"', '"', '"') : array('{', '}', '(?:}|(?=@))');
 
-        $this->entryPattern[] = '^' . $open . '(?=.*' . $close . ')';
+        $this->entryPattern[] = $open . '(?=.*' . $close . ')';
         $this->exitPattern[] = $exit;
 
         $this->allowedModes = array('nested_braces_' . $type);
